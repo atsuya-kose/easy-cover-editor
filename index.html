@@ -230,7 +230,12 @@ function syncTracks(force, keepYT) {
     if (waitYT) { if (!el.paused) el.pause(); continue; }
     if (inside) {
       if (force || el.paused) { el.currentTime = local; el.play().catch(() => {}); }
-      else if (Math.abs(el.currentTime - local) > 0.12) el.currentTime = local;
+      else {
+        // シークは重いので、小さなずれは再生速度の微調整で吸収し、大きくずれた時だけシークする
+        const d = el.currentTime - local;
+        if (Math.abs(d) > 0.5) { el.currentTime = local; el.playbackRate = 1; }
+        else el.playbackRate = Math.abs(d) < 0.04 ? 1 : (d > 0 ? 0.97 : 1.03);
+      }
     } else if (!el.paused) el.pause();
   }
 }
@@ -253,7 +258,7 @@ function play() {
 function pause() {
   if (!playing) return;
   base = now(); playing = false; waitYT = false;
-  tracks.forEach(t => t.el.pause());
+  tracks.forEach(t => { t.el.pause(); if (!t.yt) t.el.playbackRate = 1; });
   updatePlayBtn();
 }
 function seek(t) {
