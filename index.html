@@ -203,16 +203,28 @@ function updateTotal() {
 }
 
 /* ---------- transport ---------- */
-const now = () => playing ? Math.min(total, base + (performance.now() - wall) / 1000) : base;
+// YouTube が読み込み中の間は時計を止めて待つ(waitYT)
+let waitYT = false;
+const now = () => playing && !waitYT ? Math.min(total, base + (performance.now() - wall) / 1000) : base;
+const liveYT = () => { const y = song(); return y && y.yt && !exporting ? y : null; };
 
-function syncTracks(force) {
+function syncTracks(force, keepYT) {
   const T = now();
   for (const t of tracks) {
     const el = t.el, local = T - t.offset;
     const inside = t.dur > 0 && local >= 0 && local < t.dur;
+    if (t.yt) {
+      // YouTube は時計の基準(マスター)。こちらからは位置合わせのシークをしない
+      if (exporting || !inside) { if (t.player.getPlayerState() === 1 || t.player.getPlayerState() === 3) t.player.pauseVideo(); continue; }
+      const st = t.player.getPlayerState();
+      if (force && !keepYT) { t.player.seekTo(local, true); t.player.playVideo(); }
+      else if (st === 2 || st === 5 || st === -1) t.player.playVideo();
+      continue;
+    }
+    if (waitYT) { if (!el.paused) el.pause(); continue; }
     if (inside) {
       if (force || el.paused) { el.currentTime = local; el.play().catch(() => {}); }
-      else if (Math.abs(el.currentTime - local) > (t.yt ? 0.35 : 0.12)) el.currentTime = local;
+      else if (Math.abs(el.currentTime - local) > 0.12) el.currentTime = local;
     } else if (!el.paused) el.pause();
   }
 }
@@ -229,25 +241,46 @@ function play() {
   ensureAudio(); ctx.resume();
   if (base >= total - 0.05) base = 0;
   wall = performance.now(); playing = true;
+  armWait();
   syncTracks(true); updatePlayBtn();
 }
 function pause() {
   if (!playing) return;
-  base = now(); playing = false;
+  base = now(); playing = false; waitYT = false;
   tracks.forEach(t => t.el.pause());
   updatePlayBtn();
 }
 function seek(t) {
   t = Math.min(Math.max(t, 0), total);
   base = t; wall = performance.now();
-  if (playing) syncTracks(true); else scrub();
+  if (playing) { armWait(); syncTracks(true); } else scrub();
 }
 function finish() {
   pause(); base = 0; scrub();
   if (exportCtl) exportCtl.stop();
 }
+function armWait() {
+  const y = liveYT(), yl = base - (y ? y.offset : 0);
+  waitYT = !!(y && yl >= 0 && yl < y.dur);
+}
+function followYT() {
+  const y = liveYT(); if (!y) { if (waitYT) { waitYT = false; wall = performance.now(); syncTracks(true, true); } return; }
+  const local = now() - y.offset;
+  if (local < 0 || local >= y.dur) { if (waitYT) { waitYT = false; wall = performance.now(); } return; }
+  const st = y.player.getPlayerState();
+  if (st === 1) {
+    const T = y.player.getCurrentTime() + y.offset;
+    if (waitYT) { waitYT = false; base = T; wall = performance.now(); syncTracks(true, true); return; }
+    if (Math.abs(T - now()) > 0.08) { base = T; wall = performance.now(); }
+  } else if (!waitYT && st !== 0) {
+    // 読み込み中: 時計と演奏動画を止めて YouTube を待つ
+    base = now(); waitYT = true;
+    tracks.forEach(t => { if (!t.yt) t.el.pause(); });
+  }
+}
 setInterval(() => {
   if (!playing) return;
+  followYT();
   if (now() >= total - 0.001) finish(); else syncTracks(false);
 }, 80);
 
