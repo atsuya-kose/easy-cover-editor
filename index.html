@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>合奏ミキサー</title>
 <style>
+label.btn{position:relative;display:inline-block;background:#2a2f38;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer}
+label.btn:hover{background:#343a45}
+.vh{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;font-size:0}
+#toast{position:fixed;left:50%;bottom:16px;transform:translateX(-50%);max-width:92vw;background:#2a2f38;border:1px solid var(--on);color:var(--fg);padding:10px 14px;border-radius:10px;font-size:13px;z-index:9;display:none}
+@media(max-width:900px){label.btn{padding:9px 12px}}
 #ytBox iframe{width:100%;height:100%;border:0}
 :root{--bg:#14161a;--panel:#1d2026;--line:#2c313a;--fg:#e8eaed;--mut:#8b93a1;--acc:#4f9dff;--on:#ffb020}
 *{box-sizing:border-box}
@@ -46,6 +51,7 @@ label.chk{display:flex;align-items:center;gap:4px;color:var(--mut)}
 </style>
 </head>
 <body>
+<div id="toast"></div>
 <div class="app" id="app">
   <div class="col">
     <div class="row"><h1>🎸 合奏ミキサー</h1><span class="hint">演奏動画を重ねて、原曲を載せて、音量を整えて書き出し</span></div>
@@ -92,8 +98,8 @@ label.chk{display:flex;align-items:center;gap:4px;color:var(--mut)}
 
   <div class="col" style="min-height:0">
     <div class="panel row">
-      <button id="btnAddVideo">＋ 演奏動画を追加</button>
-      <button id="btnSong">♪ 原曲を選ぶ</button>
+      <label class="btn" id="btnAddVideo">＋ 演奏動画を追加<input type="file" id="fileVideo" accept="video/*" multiple class="vh"></label>
+      <label class="btn" id="btnSong">♪ 原曲を選ぶ<input type="file" id="fileSong" accept="audio/*,video/*" class="vh"></label>
     </div>
     <div class="panel col" style="gap:6px">
       <div class="row"><input id="ytUrl" type="url" placeholder="YouTubeのリンクを原曲にする" class="grow" style="background:#101216;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 8px;font:inherit;min-width:0"><button id="btnYT">▶ 使う</button></div>
@@ -109,8 +115,6 @@ label.chk{display:flex;align-items:center;gap:4px;color:var(--mut)}
     </div>
   </div>
 </div>
-<input type="file" id="fileVideo" accept="video/*,.mov,.MOV,.mp4,.m4v" multiple hidden>
-<input type="file" id="fileSong" accept="audio/*,video/*" hidden>
 
 <script>
 'use strict';
@@ -157,8 +161,9 @@ function addTrack(file, kind) {
   const el = document.createElement(kind === 'video' || isVideo ? 'video' : 'audio');
   el.preload = 'auto'; el.playsInline = true; el.setAttribute('playsinline', '');
   el.src = URL.createObjectURL(file);
+  el.load();
   const t = { id: ++seq, kind, el, name: file.name.replace(/\.[^.]+$/, ''), vol: 1, mute: false, solo: false, offset: 0, show: true, dur: 0, level: 0 };
-  el.addEventListener('loadedmetadata', () => { t.dur = el.duration || 0; updateTotal(); seek(now()); renderMixer(); });
+  el.addEventListener('loadedmetadata', () => { setStatus(''); t.dur = el.duration || 0; updateTotal(); seek(now()); renderMixer(); });
   let retried = false;
   el.addEventListener('error', () => {
     // .MOV(video/quicktime)は MP4 として読み直すと再生できることが多い
@@ -182,6 +187,7 @@ function addTrack(file, kind) {
   src.connect(t.gain); t.gain.connect(t.an); t.an.connect(sink); t.gain.connect(master);
   tracks.push(t);
   applyGains(); renderMixer(); updateTotal();
+  setStatus('「' + file.name + '」を読み込み中…');
 }
 function removeTrack(t) {
   const i = tracks.indexOf(t); if (i < 0) return;
@@ -443,7 +449,13 @@ function pickMime() {
     .concat(safari ? ['video/mp4'] : [], ['video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm', 'video/mp4']);
   return window.MediaRecorder ? c.find(m => MediaRecorder.isTypeSupported(m)) : null;
 }
-function setStatus(s) { $('#status').textContent = s; }
+function setStatus(s) {
+  $('#status').textContent = s;
+  // スマホでは下の方の表示が見えないので、画面下にも数秒出す
+  const t = $('#toast'); if (!t) return;
+  t.textContent = s; t.style.display = s ? 'block' : 'none';
+  clearTimeout(setStatus.tm); if (s) setStatus.tm = setTimeout(() => t.style.display = 'none', 5000);
+}
 
 async function exportVideo() {
   if (!total || exportCtl) return;
@@ -581,8 +593,6 @@ $('#master').addEventListener('input', e => {
 });
 $('#layout').onchange = () => { $('#alphaRow').style.display = $('#layout').value === 'overlay' ? '' : 'none'; };
 $('#aspect').onchange = $('#res').onchange = applySize;
-$('#btnAddVideo').onclick = () => $('#fileVideo').click();
-$('#btnSong').onclick = () => $('#fileSong').click();
 $('#fileVideo').onchange = e => { [...e.target.files].forEach(f => addTrack(f, 'video')); e.target.value = ''; };
 $('#fileSong').onchange = e => { if (e.target.files[0]) addTrack(e.target.files[0], 'song'); e.target.value = ''; };
 $('#btnExport').onclick = exportVideo;
